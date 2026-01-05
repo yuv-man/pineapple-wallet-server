@@ -88,6 +88,12 @@ PORT=5001
 # Frontend URLs (used based on ENV_MODE)
 DEV_URL="http://localhost:3000"
 PROD_URL="https://your-production-frontend-domain.com"
+
+# Backend URL (for OAuth callbacks - your backend API URL)
+# In production: https://your-backend-domain.onrender.com (or your backend URL)
+# In development: http://localhost:5001
+# If not set, will auto-detect from Render environment or use localhost
+BACKEND_URL="http://localhost:5001"
 ```
 
 **Important Notes:**

@@ -10,10 +10,29 @@ export class GithubStrategy extends PassportStrategy(Strategy, 'github') {
     configService: ConfigService,
     private authService: AuthService,
   ) {
+    const envMode = configService.get<string>('ENV_MODE') || 'dev';
+    const isProduction = envMode === 'prod' || envMode === 'production';
+    
+    // Get backend URL - use BACKEND_URL if set, otherwise construct it
+    let backendUrl = configService.get<string>('BACKEND_URL');
+    if (!backendUrl) {
+      if (isProduction) {
+        // In production, try to get from Render's environment or use a default pattern
+        backendUrl = process.env.RENDER_EXTERNAL_URL || 
+                     `https://${process.env.RENDER_SERVICE_NAME || 'pineapple-wallet-backend'}.onrender.com`;
+      } else {
+        backendUrl = `http://localhost:${configService.get<number>('PORT') || 5001}`;
+      }
+    }
+    
+    // Remove trailing slash if present
+    backendUrl = backendUrl.replace(/\/$/, '');
+    const callbackURL = `${backendUrl}/api/auth/github/callback`;
+    
     super({
       clientID: configService.get<string>('GITHUB_CLIENT_ID'),
       clientSecret: configService.get<string>('GITHUB_CLIENT_SECRET'),
-      callbackURL: configService.get<string>('GITHUB_CALLBACK_URL'),
+      callbackURL,
       scope: ['user:email'],
     });
   }

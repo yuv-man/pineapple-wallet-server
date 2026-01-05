@@ -68,7 +68,11 @@ export class AuthController {
   @UseGuards(GoogleAuthGuard)
   async googleAuthCallback(@Req() req: any, @Res() res: Response) {
     const tokens = await this.authService.login(req.user);
-    const frontendUrl = this.configService.get<string>('FRONTEND_URL');
+    const envMode = this.configService.get<string>('ENV_MODE') || 'dev';
+    const isProduction = envMode === 'prod' || envMode === 'production';
+    const frontendUrl = isProduction
+      ? this.configService.get<string>('PROD_URL')
+      : this.configService.get<string>('DEV_URL') || 'http://localhost:3000';
     res.redirect(
       `${frontendUrl}/auth/callback?accessToken=${tokens.accessToken}&refreshToken=${tokens.refreshToken}`,
     );
@@ -84,7 +88,11 @@ export class AuthController {
   @UseGuards(GithubAuthGuard)
   async githubAuthCallback(@Req() req: any, @Res() res: Response) {
     const tokens = await this.authService.login(req.user);
-    const frontendUrl = this.configService.get<string>('FRONTEND_URL');
+    const envMode = this.configService.get<string>('ENV_MODE') || 'dev';
+    const isProduction = envMode === 'prod' || envMode === 'production';
+    const frontendUrl = isProduction
+      ? this.configService.get<string>('PROD_URL')
+      : this.configService.get<string>('DEV_URL') || 'http://localhost:3000';
     res.redirect(
       `${frontendUrl}/auth/callback?accessToken=${tokens.accessToken}&refreshToken=${tokens.refreshToken}`,
     );
