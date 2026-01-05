@@ -1,0 +1,114 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String    @id @default(uuid())
+  email         String    @unique
+  password      String?
+  name          String
+  avatar        String?
+  provider      String?   // 'local', 'google', 'github'
+  providerId    String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  portfolios    Portfolio[]
+  sharedWith    PortfolioShare[] @relation("SharedWithUser")
+  refreshTokens RefreshToken[]
+
+  @@map("users")
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  token     String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@map("refresh_tokens")
+}
+
+model Portfolio {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  assets      Asset[]
+  shares      PortfolioShare[]
+
+  @@map("portfolios")
+}
+
+model PortfolioShare {
+  id               String      @id @default(uuid())
+  portfolioId      String
+  portfolio        Portfolio   @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+  sharedWithUserId String
+  sharedWithUser   User        @relation("SharedWithUser", fields: [sharedWithUserId], references: [id], onDelete: Cascade)
+  permission       Permission  @default(VIEW)
+  status           ShareStatus @default(PENDING)
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+
+  @@unique([portfolioId, sharedWithUserId])
+  @@map("portfolio_shares")
+}
+
+enum Permission {
+  VIEW
+  EDIT
+}
+
+enum ShareStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+}
+
+model Asset {
+  id          String    @id @default(uuid())
+  portfolioId String
+  portfolio   Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+  type        AssetType
+  name        String
+  value       Decimal   @db.Decimal(20, 2)
+  currency    String    @default("USD")
+  notes       String?
+  details     Json?     // Type-specific details stored as JSON
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  valueHistory AssetValueHistory[]
+
+  @@map("assets")
+}
+
+enum AssetType {
+  BANK_ACCOUNT
+  REAL_ESTATE
+  CRYPTO
+  STOCK
+  INVESTMENT
+}
+
+model AssetValueHistory {
+  id        String   @id @default(uuid())
+  assetId   String
+  asset     Asset    @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  value     Decimal  @db.Decimal(20, 2)
+  recordedAt DateTime @default(now())
+
+  @@map("asset_value_history")
+}
