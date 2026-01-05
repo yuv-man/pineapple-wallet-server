@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { User } from '@prisma/client';
+import { User, Prisma } from '@prisma/client';
 
 @Injectable()
 export class UsersService {
@@ -44,7 +44,22 @@ export class UsersService {
     await this.prisma.user.delete({ where: { id } });
   }
 
-  async searchByEmail(email: string, excludeUserId: string): Promise<User[]> {
+  async searchByEmail(
+    email: string,
+    excludeUserId: string,
+  ): Promise<
+    Prisma.UserGetPayload<{
+      select: {
+        id: true;
+        email: true;
+        name: true;
+        avatar: true;
+        createdAt: true;
+        updatedAt: true;
+        provider: true;
+      };
+    }>[]
+  > {
     return this.prisma.user.findMany({
       where: {
         email: { contains: email, mode: 'insensitive' },
@@ -58,10 +73,8 @@ export class UsersService {
         avatar: true,
         createdAt: true,
         updatedAt: true,
-        password: false,
         provider: true,
-        providerId: false,
-      } as any,
+      },
     });
   }
 }
