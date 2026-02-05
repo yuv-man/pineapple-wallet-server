@@ -40,7 +40,7 @@ export class AuthController {
     const defaultUrl = isProduction
       ? this.configService.get<string>("PROD_URL")
       : this.configService.get<string>("DEV_URL") || "http://localhost:3000";
-    const defaultTarget = `${defaultUrl.replace(/\/$/, "")}/auth/callback`;
+    const defaultTarget = `${defaultUrl?.replace(/\/$/, "")}/auth/callback`;
 
     const raw =
       stateFromQuery && typeof stateFromQuery === "string"

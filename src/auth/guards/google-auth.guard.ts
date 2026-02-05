@@ -1,5 +1,12 @@
-import { Injectable } from '@nestjs/common';
-import { AuthGuard } from '@nestjs/passport';
+import { Injectable, ExecutionContext } from "@nestjs/common";
+import { AuthGuard } from "@nestjs/passport";
 
 @Injectable()
-export class GoogleAuthGuard extends AuthGuard('google') {}
+export class GoogleAuthGuard extends AuthGuard("google") {
+  getAuthenticateOptions(context: ExecutionContext) {
+    const request = context.switchToHttp().getRequest();
+    const redirectUri = request.query?.redirect_uri as string | undefined;
+    // Pass client redirect_uri as OAuth state so we can redirect back to app/mobile after login
+    return redirectUri ? { state: redirectUri } : {};
+  }
+}
