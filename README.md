@@ -5,16 +5,19 @@ A comprehensive NestJS backend API for managing personal financial portfolios an
 ## 🍍 Features
 
 ### Authentication & Authorization
+
 - **Multiple Auth Methods**: Support for local email/password, Google OAuth, and GitHub OAuth
 - **JWT Authentication**: Secure token-based authentication with refresh tokens
 - **Session Management**: Logout functionality with refresh token invalidation
 
 ### Portfolio Management
+
 - Create, read, update, and delete portfolios
 - Organize assets into multiple portfolios
 - Track portfolio metadata (name, description)
 
 ### Asset Tracking
+
 - **Multiple Asset Types**: Support for various asset categories:
   - Bank Accounts
   - Real Estate
@@ -26,12 +29,14 @@ A comprehensive NestJS backend API for managing personal financial portfolios an
 - **Flexible Details**: Store type-specific asset details as JSON
 
 ### Portfolio Sharing
+
 - Share portfolios with other users
 - **Permission Levels**: VIEW or EDIT permissions
 - **Invitation System**: Send invitations that can be accepted or declined
 - **Share Management**: Update permissions or revoke shares
 
 ### Currency Support
+
 - Multi-currency asset tracking
 - Default currency: USD
 
@@ -94,13 +99,34 @@ PROD_URL="https://your-production-frontend-domain.com"
 # In development: http://localhost:5001
 # If not set, will auto-detect from Render environment or use localhost
 BACKEND_URL="http://localhost:5001"
+
+# Allowed redirect schemes for mobile app deep links (comma-separated)
+# e.g. pineapplewallet,myapp so that pineapplewallet://auth/callback is allowed after OAuth
+ALLOWED_REDIRECT_SCHEMES="pineapplewallet"
 ```
 
 **Important Notes:**
+
 - Set `ENV_MODE=dev` for local development
 - Set `ENV_MODE=prod` for production deployment
 - The application will use `DEV_URL` when `ENV_MODE=dev` and `PROD_URL` when `ENV_MODE=prod`
 - Never commit your `.env` file to version control
+
+**Mobile app OAuth redirect:** To redirect back to the native app after Google/GitHub login, the app should open the auth URL with a `redirect_uri` query param (URL-encoded). Example: `GET /api/auth/google?redirect_uri=pineapplewallet%3A%2F%2Fauth%2Fcallback`. Add the app’s URL scheme to `ALLOWED_REDIRECT_SCHEMES` (e.g. `pineapplewallet`).
+
+**If Google/GitHub login always redirects to the website (e.g. pineapple-wallet.vercel.app) instead of the app:**
+
+1. **Set `ALLOWED_REDIRECT_SCHEMES` in production**  
+   In your hosting env (e.g. Render), add:  
+   `ALLOWED_REDIRECT_SCHEMES=pineapplewallet`  
+   (use your app’s URL scheme). Without this, the backend rejects the app deep link and falls back to `PROD_URL`.
+
+2. **Open the backend auth URL from the app, with `redirect_uri`**  
+   The link that starts Google sign-in must be your **backend** URL, not the Vercel site, and must include the encoded deep link:
+   ```text
+   https://YOUR_BACKEND_URL/api/auth/google?redirect_uri=pineapplewallet%3A%2F%2Fauth%2Fcallback
+   ```
+   If the app opens `https://pineapple-wallet.vercel.app/...` and that page redirects to the backend, the frontend must forward `redirect_uri` to the backend (e.g. pass it as a query param and append it when redirecting to `/api/auth/google`). Otherwise the backend never gets `redirect_uri`, so it redirects to `PROD_URL` (Vercel) after login.
 
 ### 3. Database Setup
 
@@ -121,11 +147,13 @@ npm run db:push
 
 1. Set `ENV_MODE=dev` in your `.env` file
 2. Start the development server:
+
 ```bash
 npm run start:dev
 ```
 
 This will:
+
 - Use `DEV_URL` for CORS configuration
 - Enable hot-reload with watch mode
 - Show detailed error messages
@@ -137,21 +165,25 @@ The API will be available at `http://localhost:5001/api`
 
 1. Set `ENV_MODE=prod` in your `.env` file
 2. Build the application:
+
 ```bash
 npm run build
 ```
 
 3. Run migrations (if needed):
+
 ```bash
 npm run prisma:migrate:prod
 ```
 
 4. Start the production server:
+
 ```bash
 npm run start:prod
 ```
 
 This will:
+
 - Use `PROD_URL` for CORS configuration
 - Hide detailed error messages
 - Use strict CORS (only `PROD_URL` allowed)
@@ -160,6 +192,7 @@ This will:
 ## 📚 API Endpoints
 
 ### Authentication (`/api/auth`)
+
 - `POST /api/auth/register` - Register a new user
 - `POST /api/auth/login` - Login with email/password
 - `POST /api/auth/refresh` - Refresh access token
@@ -171,11 +204,13 @@ This will:
 - `GET /api/auth/me` - Get current user info (protected)
 
 ### Users (`/api/users`)
+
 - `GET /api/users/:id` - Get user by ID (protected)
 - `PATCH /api/users/:id` - Update user (protected)
 - `DELETE /api/users/:id` - Delete user (protected)
 
 ### Portfolios (`/api/portfolios`)
+
 - `POST /api/portfolios` - Create a new portfolio (protected)
 - `GET /api/portfolios` - Get all user's portfolios (protected)
 - `GET /api/portfolios/:id` - Get portfolio by ID (protected)
@@ -183,6 +218,7 @@ This will:
 - `DELETE /api/portfolios/:id` - Delete portfolio (protected)
 
 ### Assets (`/api/assets`)
+
 - `POST /api/assets` - Create a new asset (protected)
 - `GET /api/assets` - Get all assets (protected)
 - `GET /api/assets/:id` - Get asset by ID (protected)
@@ -190,6 +226,7 @@ This will:
 - `DELETE /api/assets/:id` - Delete asset (protected)
 
 ### Sharing (`/api`)
+
 - `POST /api/portfolios/:portfolioId/share` - Share portfolio with user (protected)
 - `GET /api/portfolios/:portfolioId/shares` - Get shares for portfolio (protected)
 - `GET /api/invitations` - Get pending invitations (protected)
@@ -199,6 +236,7 @@ This will:
 - `GET /api/shared-with-me` - Get portfolios shared with current user (protected)
 
 ### Currency (`/api/currency`)
+
 - `GET /api/currency` - Get currency information
 
 ## 🗄️ Database Schema
@@ -206,27 +244,32 @@ This will:
 ### Models
 
 **User**
+
 - Basic user information
 - Support for multiple auth providers (local, Google, GitHub)
 - Refresh token management
 
 **Portfolio**
+
 - User-owned portfolio containers
 - Contains multiple assets
 - Can be shared with other users
 
 **Asset**
+
 - Belongs to a portfolio
 - Supports multiple types (BANK_ACCOUNT, REAL_ESTATE, CRYPTO, STOCK, INVESTMENT)
 - Stores value, currency, and type-specific details
 - Tracks value history over time
 
 **PortfolioShare**
+
 - Manages sharing relationships between users and portfolios
 - Permission levels: VIEW, EDIT
 - Share status: PENDING, ACCEPTED, DECLINED
 
 **AssetValueHistory**
+
 - Historical tracking of asset values
 - Timestamped value records
 
@@ -267,6 +310,7 @@ npm run format             # Format code with Prettier
 The application uses the `ENV_MODE` variable in your `.env` file to determine the environment.
 
 ### Development Mode (`ENV_MODE=dev`)
+
 - Uses `DEV_URL` for CORS configuration
 - Detailed error messages and stack traces
 - Hot-reload enabled
@@ -274,6 +318,7 @@ The application uses the `ENV_MODE` variable in your `.env` file to determine th
 - Debug logging enabled
 
 ### Production Mode (`ENV_MODE=prod`)
+
 - Uses `PROD_URL` for CORS configuration
 - Minimal error messages (security)
 - Strict CORS (only `PROD_URL` allowed)
@@ -308,6 +353,7 @@ src/
 ## 📦 Dependencies
 
 ### Core
+
 - `@nestjs/common`, `@nestjs/core` - NestJS framework
 - `@prisma/client` - Prisma ORM client
 - `passport`, `passport-jwt`, `passport-local` - Authentication
@@ -325,4 +371,3 @@ src/
 ## 📄 License
 
 MIT
-
