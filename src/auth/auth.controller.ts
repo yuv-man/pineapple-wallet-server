@@ -51,12 +51,22 @@ export class AuthController {
     const allowedSchemes = this.configService.get<string>(
       "ALLOWED_REDIRECT_SCHEMES"
     );
-    const schemes = allowedSchemes
-      ? allowedSchemes
-          .split(",")
-          .map((s) => s.trim().toLowerCase())
-          .filter(Boolean)
-      : [];
+    // Default matches the Capacitor app scheme in frontend/src/lib/capacitor.ts so
+    // mobile OAuth works if the env var was not set on the deployed API.
+    const defaultMobileScheme = "pineapplewallet";
+    const schemes = [
+      ...new Set(
+        [
+          defaultMobileScheme,
+          ...(allowedSchemes
+            ? allowedSchemes
+                .split(",")
+                .map((s) => s.trim().toLowerCase())
+                .filter(Boolean)
+            : []),
+        ].filter(Boolean)
+      ),
+    ];
 
     try {
       const url = new URL(raw);
@@ -73,8 +83,8 @@ export class AuthController {
         if (prod && raw.startsWith(prod)) return raw;
         if (dev && raw.startsWith(dev)) return raw;
       }
-      // Allow custom URL schemes (e.g. pineapplewallet://auth/callback) if listed
-      if (url.protocol.endsWith(":") && schemes.length) {
+      // Allow custom URL schemes (e.g. pineapplewallet://auth/callback)
+      if (url.protocol.endsWith(":")) {
         const scheme = url.protocol.slice(0, -1).toLowerCase();
         if (schemes.includes(scheme)) return raw;
       }
