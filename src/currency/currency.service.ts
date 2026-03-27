@@ -142,6 +142,7 @@ export class CurrencyService {
       USD: 1,
       EUR: 0.92,
       GBP: 0.79,
+      ILS: 3.65,
       JPY: 149.50,
       CHF: 0.88,
       CAD: 1.36,

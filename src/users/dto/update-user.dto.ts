@@ -1,4 +1,10 @@
-import { IsString, IsOptional, MinLength, MaxLength } from 'class-validator';
+import { IsString, IsOptional, MinLength, MaxLength, IsIn } from 'class-validator';
+
+const SUPPORTED_CURRENCIES = [
+  'USD', 'EUR', 'GBP', 'ILS', 'JPY', 'CHF', 'CAD', 'AUD', 'NZD',
+  'CNY', 'INR', 'MXN', 'BRL', 'KRW', 'SGD', 'HKD', 'SEK', 'NOK',
+  'DKK', 'PLN', 'ZAR'
+];
 
 export class UpdateUserDto {
   @IsOptional()
@@ -10,4 +16,9 @@ export class UpdateUserDto {
   @IsOptional()
   @IsString()
   avatar?: string;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(SUPPORTED_CURRENCIES, { message: 'Invalid currency code' })
+  displayCurrency?: string;
 }
