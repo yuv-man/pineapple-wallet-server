@@ -30,9 +30,15 @@ export class UsersService {
     if (!user) {
       throw new NotFoundException('User not found');
     }
+    const dataEntries = Object.entries(data).filter(
+      ([, v]) => v !== undefined && v !== null,
+    );
+    if (dataEntries.length === 0) {
+      return user;
+    }
     return this.prisma.user.update({
       where: { id },
-      data,
+      data: Object.fromEntries(dataEntries) as Prisma.UserUpdateInput,
     });
   }
 
