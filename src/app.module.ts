@@ -7,6 +7,10 @@ import { AssetsModule } from './assets/assets.module';
 import { SharingModule } from './sharing/sharing.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { CurrencyModule } from './currency/currency.module';
+import { PropertiesModule } from './properties/properties.module';
+import { PropertyTransactionsModule } from './property-transactions/property-transactions.module';
+import { PropertyCategoriesModule } from './property-categories/property-categories.module';
+import { PropertySharingModule } from './property-sharing/property-sharing.module';
 
 @Module({
   imports: [
@@ -20,6 +24,10 @@ import { CurrencyModule } from './currency/currency.module';
     PortfoliosModule,
     AssetsModule,
     SharingModule,
+    PropertiesModule,
+    PropertyTransactionsModule,
+    PropertyCategoriesModule,
+    PropertySharingModule,
   ],
 })
 export class AppModule {}

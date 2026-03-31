@@ -23,6 +23,11 @@ model User {
   sharedWith    PortfolioShare[] @relation("SharedWithUser")
   refreshTokens RefreshToken[]
 
+  // Property relations
+  properties         Property[]
+  propertySharedWith PropertyShare[] @relation("SharedWithUserProperty")
+  customCategories   PropertyCategory[]
+
   @@map("users")
 }
 
@@ -112,4 +117,79 @@ model AssetValueHistory {
   recordedAt DateTime @default(now())
 
   @@map("asset_value_history")
+}
+
+// ==================== PROPERTY MODELS ====================
+
+enum TransactionType {
+  EXPENSE
+  PROFIT
+}
+
+enum CategoryType {
+  EXPENSE
+  PROFIT
+}
+
+model Property {
+  id          String   @id @default(uuid())
+  name        String
+  address     String?
+  description String?
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  transactions PropertyTransaction[]
+  shares       PropertyShare[]
+
+  @@map("properties")
+}
+
+model PropertyCategory {
+  id        String       @id @default(uuid())
+  name      String
+  type      CategoryType
+  isSystem  Boolean      @default(false)
+  userId    String?
+  user      User?        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime     @default(now())
+
+  transactions PropertyTransaction[]
+
+  @@unique([name, type, userId])
+  @@map("property_categories")
+}
+
+model PropertyTransaction {
+  id          String           @id @default(uuid())
+  propertyId  String
+  property    Property         @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  categoryId  String
+  category    PropertyCategory @relation(fields: [categoryId], references: [id])
+  type        TransactionType
+  amount      Decimal          @db.Decimal(20, 2)
+  currency    String           @default("USD")
+  date        DateTime
+  description String?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  @@map("property_transactions")
+}
+
+model PropertyShare {
+  id               String      @id @default(uuid())
+  propertyId       String
+  property         Property    @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  sharedWithUserId String
+  sharedWithUser   User        @relation("SharedWithUserProperty", fields: [sharedWithUserId], references: [id], onDelete: Cascade)
+  permission       Permission  @default(VIEW)
+  status           ShareStatus @default(PENDING)
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+
+  @@unique([propertyId, sharedWithUserId])
+  @@map("property_shares")
 }
