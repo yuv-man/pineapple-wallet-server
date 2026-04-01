@@ -3,6 +3,7 @@ import {
   NotFoundException,
   ForbiddenException,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { PropertiesService } from '../properties/properties.service';
 import { CreatePropertyTransactionDto } from './dto/create-property-transaction.dto';
@@ -156,7 +157,9 @@ export class PropertyTransactionsService {
       );
     }
 
-    const transactions = await this.prisma.propertyTransaction.findMany({
+    const transactions: Prisma.PropertyTransactionGetPayload<{
+      include: { category: true };
+    }>[] = await this.prisma.propertyTransaction.findMany({
       where: { propertyId },
       include: {
         category: true,
@@ -177,11 +180,11 @@ export class PropertyTransactionsService {
 
     const totalProfit = transactions
       .filter((t) => t.type === 'PROFIT')
-      .reduce((sum, t) => sum + Number(t.amount), 0);
+      .reduce<number>((sum, t) => sum + Number(t.amount), 0);
 
     const totalExpenses = transactions
       .filter((t) => t.type === 'EXPENSE')
-      .reduce((sum, t) => sum + Number(t.amount), 0);
+      .reduce<number>((sum, t) => sum + Number(t.amount), 0);
 
     return {
       byCategory: Object.values(byCategory),
