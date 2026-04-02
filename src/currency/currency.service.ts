@@ -67,55 +67,99 @@ export class CurrencyService {
   // Supported cryptocurrencies
   private readonly CRYPTO_CURRENCIES = ['BTC', 'ETH', 'USDT', 'BNB', 'XRP', 'ADA', 'SOL', 'DOGE'];
 
+  private describeError(err: unknown): string {
+    if (err instanceof Error) {
+      return `${err.name}: ${err.message}`;
+    }
+    return typeof err === 'string' ? err : JSON.stringify(err);
+  }
+
   async getExchangeRates(baseCurrency: string = 'USD'): Promise<ExchangeRates> {
     const now = new Date();
+    const base = String(baseCurrency).toUpperCase();
 
     // Return cached rates if still valid
     if (
       this.exchangeRates &&
-      this.exchangeRates.base === baseCurrency &&
+      this.exchangeRates.base === base &&
       this.lastFetchTime &&
       now.getTime() - this.lastFetchTime.getTime() < this.CACHE_DURATION_MS
     ) {
+      const ageMs = now.getTime() - this.lastFetchTime.getTime();
+      this.logger.log(
+        `[rates] cache hit base=${base} ageMs=${ageMs} ttlMs=${this.CACHE_DURATION_MS}`,
+      );
       return this.exchangeRates;
     }
 
+    this.logger.log(
+      `[rates] fetch start base=${base} hadCachedCryptoKeys=${Object.keys(this.cryptoRates).length}`,
+    );
+
     try {
-      // Fetch fiat exchange rates from Frankfurter API (free, no API key needed)
-      const fiatResponse = await fetch(
-        `https://api.frankfurter.app/latest?from=${baseCurrency}`,
-        { headers: OUTBOUND_FETCH_HEADERS },
-      );
+      const frankfurterUrl = `https://api.frankfurter.app/latest?from=${encodeURIComponent(base)}`;
+      const t0 = Date.now();
+      const fiatResponse = await fetch(frankfurterUrl, {
+        headers: OUTBOUND_FETCH_HEADERS,
+      });
+      const fiatMs = Date.now() - t0;
 
       if (!fiatResponse.ok) {
-        throw new Error('Failed to fetch fiat exchange rates');
+        let bodySnippet = '';
+        try {
+          bodySnippet = (await fiatResponse.text()).slice(0, 500);
+        } catch {
+          bodySnippet = '(could not read body)';
+        }
+        this.logger.error(
+          `[rates] Frankfurter HTTP error base=${base} status=${fiatResponse.status} statusText=${fiatResponse.statusText} ms=${fiatMs} bodySnippet=${JSON.stringify(bodySnippet)}`,
+        );
+        throw new Error(`Frankfurter HTTP ${fiatResponse.status}`);
       }
 
-      const fiatData = await fiatResponse.json();
+      let fiatData: { rates?: Record<string, number> };
+      try {
+        fiatData = (await fiatResponse.json()) as { rates?: Record<string, number> };
+      } catch (parseErr: unknown) {
+        this.logger.error(
+          `[rates] Frankfurter JSON parse failed base=${base} ms=${fiatMs} err=${this.describeError(parseErr)}`,
+        );
+        throw parseErr;
+      }
 
-      // Crypto: Binance USDT prices, converted into `baseCurrency` via Frankfurter fiat rates
-      const cryptoRates = await this.fetchCryptoRates(
-        baseCurrency,
-        (fiatData.rates as Record<string, number>) || {},
+      const fiatRates = fiatData.rates || {};
+      const fiatKeys = Object.keys(fiatRates).length;
+      this.logger.log(
+        `[rates] Frankfurter ok base=${base} fiatPairCount=${fiatKeys} hasUsdCross=${fiatRates['USD'] !== undefined} ms=${fiatMs}`,
       );
 
+      // Crypto: Binance USDT prices, converted into `baseCurrency` via Frankfurter fiat rates
+      const cryptoRates = await this.fetchCryptoRates(base, fiatRates);
+
+      const merged = {
+        [base]: 1,
+        ...fiatRates,
+        ...cryptoRates,
+      };
       this.exchangeRates = {
-        base: baseCurrency,
-        rates: {
-          [baseCurrency]: 1,
-          ...fiatData.rates,
-          ...cryptoRates,
-        },
+        base,
+        rates: merged,
         lastUpdated: new Date(),
       };
 
       this.lastFetchTime = now;
-      this.logger.log(`Exchange rates updated for base currency: ${baseCurrency}`);
+      const cryptoKeys = Object.keys(cryptoRates).length;
+      this.logger.log(
+        `[rates] success base=${base} totalKeys=${Object.keys(merged).length} cryptoKeys=${cryptoKeys}`,
+      );
 
       return this.exchangeRates;
     } catch (error) {
-      this.logger.error('Failed to fetch exchange rates, using fallback', error);
-      return this.getFallbackRates(baseCurrency);
+      this.logger.error(
+        `[rates] live fetch failed base=${base} → fallback static rates. ${this.describeError(error)}`,
+        error instanceof Error ? error.stack : undefined,
+      );
+      return this.getFallbackRates(base);
     }
   }
 
@@ -127,45 +171,85 @@ export class CurrencyService {
     baseCurrency: string,
     fiatRates: Record<string, number>,
   ): Promise<Record<string, number>> {
+    const base = baseCurrency.toUpperCase();
     try {
+      const t0 = Date.now();
       const response = await fetch(BINANCE_TICKER_URL, {
         headers: OUTBOUND_FETCH_HEADERS,
       });
+      const binanceMs = Date.now() - t0;
 
       if (!response.ok) {
+        let bodySnippet = '';
+        try {
+          bodySnippet = (await response.text()).slice(0, 500);
+        } catch {
+          bodySnippet = '(could not read body)';
+        }
+        this.logger.error(
+          `[rates] Binance HTTP error base=${base} status=${response.status} statusText=${response.statusText} ms=${binanceMs} bodySnippet=${JSON.stringify(bodySnippet)}`,
+        );
         throw new Error(`Binance ticker HTTP ${response.status}`);
       }
 
-      const rows = (await response.json()) as Array<{ symbol: string; price: string }>;
+      let rows: unknown;
+      try {
+        rows = await response.json();
+      } catch (parseErr: unknown) {
+        this.logger.error(
+          `[rates] Binance JSON parse failed base=${base} ms=${binanceMs} err=${this.describeError(parseErr)}`,
+        );
+        throw parseErr;
+      }
+
       if (!Array.isArray(rows)) {
+        const typeDesc = rows === null ? 'null' : typeof rows;
+        this.logger.error(
+          `[rates] Binance unexpected shape base=${base} type=${typeDesc} ms=${binanceMs} sample=${JSON.stringify(rows).slice(0, 300)}`,
+        );
         throw new Error('Unexpected Binance ticker response');
       }
 
       const byTicker = new Map<string, number>();
       for (const row of rows) {
-        const price = parseFloat(row.price);
+        if (!row || typeof row !== 'object') continue;
+        const r = row as { symbol?: string; price?: string };
+        if (typeof r.symbol !== 'string' || typeof r.price !== 'string') continue;
+        const price = parseFloat(r.price);
         if (Number.isFinite(price) && price > 0) {
-          byTicker.set(row.symbol, price);
+          byTicker.set(r.symbol, price);
         }
       }
 
       const priceUsdPerCoin: Record<string, number> = {};
+      const missingFromBinance: string[] = [];
       for (const { asset, ticker } of BINANCE_USDT_PAIRS) {
         const p = byTicker.get(ticker);
         if (p !== undefined) {
           priceUsdPerCoin[asset] = p;
+        } else {
+          missingFromBinance.push(ticker);
         }
       }
 
-      const base = baseCurrency.toUpperCase();
       // Frankfurter: rates['USD'] = USD per 1 unit of base (not present when base is USD).
       const rawUsd = base === 'USD' ? 1 : fiatRates['USD'];
       const u =
         typeof rawUsd === 'number' && Number.isFinite(rawUsd) && rawUsd > 0 ? rawUsd : 1;
 
+      this.logger.log(
+        `[rates] Binance ok base=${base} rowCount=${rows.length} tickersParsed=${byTicker.size} usdPerOneBase=${u} (Frankfurter USD field=${fiatRates['USD'] ?? 'absent'}) ms=${binanceMs}`,
+      );
+
+      if (missingFromBinance.length > 0) {
+        this.logger.warn(
+          `[rates] Binance missing tickers base=${base}: ${missingFromBinance.join(', ')}`,
+        );
+      }
+
       if (base !== 'USD' && u === 1 && fiatRates['USD'] === undefined) {
         this.logger.warn(
-          `No USD cross-rate from Frankfurter for base ${base}; using u=1 for crypto (check fiat list)`,
+          `[rates] No USD cross-rate from Frankfurter for base=${base}; crypto uses usdPerOneBase=1 (likely wrong vs USD)`,
         );
       }
 
@@ -180,15 +264,28 @@ export class CurrencyService {
       // USDT ≈ 1 USD (no USDTUSDT pair needed)
       rates['USDT'] = u;
 
+      if (Object.keys(rates).length <= 1) {
+        this.logger.warn(
+          `[rates] Binance produced almost no crypto rates base=${base} keys=${Object.keys(rates).join(',')}`,
+        );
+      }
+
       this.cryptoRates = rates;
       return rates;
     } catch (error) {
-      this.logger.warn('Failed to fetch crypto rates from Binance, using cached or empty', error);
+      this.logger.warn(
+        `[rates] Binance path failed base=${base} returning stale crypto cache (keys=${Object.keys(this.cryptoRates).length}). ${this.describeError(error)}`,
+        error instanceof Error ? error.stack : undefined,
+      );
       return this.cryptoRates;
     }
   }
 
   private getFallbackRates(baseCurrency: string): ExchangeRates {
+    const base = baseCurrency.toUpperCase();
+    this.logger.warn(
+      `[rates] using static fallback rates base=${base} (live Frankfurter/Binance unavailable or parse error — see earlier [rates] error logs)`,
+    );
     // Fallback rates (approximate, for when API is unavailable)
     const usdRates: Record<string, number> = {
       USD: 1,
@@ -207,7 +304,7 @@ export class CurrencyService {
       USDT: 1,
     };
 
-    if (baseCurrency === 'USD') {
+    if (base === 'USD') {
       return {
         base: 'USD',
         rates: usdRates,
@@ -216,7 +313,7 @@ export class CurrencyService {
     }
 
     // Convert all rates to the requested base currency
-    const baseRate = usdRates[baseCurrency] || 1;
+    const baseRate = (usdRates as Record<string, number>)[base] ?? 1;
     const convertedRates: Record<string, number> = {};
 
     for (const [currency, rate] of Object.entries(usdRates)) {
@@ -224,7 +321,7 @@ export class CurrencyService {
     }
 
     return {
-      base: baseCurrency,
+      base,
       rates: convertedRates,
       lastUpdated: new Date(),
     };
