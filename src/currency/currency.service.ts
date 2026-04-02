@@ -26,6 +26,29 @@ export interface PortfolioSummary {
   lastUpdated: Date;
 }
 
+/** Identifiable client for outbound HTTP (avoids blocks on default Node UA in some regions). */
+const OUTBOUND_FETCH_HEADERS = {
+  Accept: 'application/json',
+  'User-Agent': 'PineappleWalletBackend/1.0',
+} as const;
+
+/** Binance USDT spot tickers — generous public limits, works reliably from cloud hosts. */
+const BINANCE_USDT_PAIRS: Array<{ asset: string; ticker: string }> = [
+  { asset: 'BTC', ticker: 'BTCUSDT' },
+  { asset: 'ETH', ticker: 'ETHUSDT' },
+  { asset: 'BNB', ticker: 'BNBUSDT' },
+  { asset: 'XRP', ticker: 'XRPUSDT' },
+  { asset: 'ADA', ticker: 'ADAUSDT' },
+  { asset: 'SOL', ticker: 'SOLUSDT' },
+  { asset: 'DOGE', ticker: 'DOGEUSDT' },
+];
+
+const BINANCE_TICKER_URL =
+  'https://api.binance.com/api/v3/ticker/price?symbols=' +
+  encodeURIComponent(
+    JSON.stringify(BINANCE_USDT_PAIRS.map((p) => p.ticker)),
+  );
+
 @Injectable()
 export class CurrencyService {
   private readonly logger = new Logger(CurrencyService.name);
@@ -60,7 +83,8 @@ export class CurrencyService {
     try {
       // Fetch fiat exchange rates from Frankfurter API (free, no API key needed)
       const fiatResponse = await fetch(
-        `https://api.frankfurter.app/latest?from=${baseCurrency}`
+        `https://api.frankfurter.app/latest?from=${baseCurrency}`,
+        { headers: OUTBOUND_FETCH_HEADERS },
       );
 
       if (!fiatResponse.ok) {
@@ -69,8 +93,11 @@ export class CurrencyService {
 
       const fiatData = await fiatResponse.json();
 
-      // Fetch crypto rates from CoinGecko (free, no API key needed for basic usage)
-      const cryptoRates = await this.fetchCryptoRates(baseCurrency);
+      // Crypto: Binance USDT prices, converted into `baseCurrency` via Frankfurter fiat rates
+      const cryptoRates = await this.fetchCryptoRates(
+        baseCurrency,
+        (fiatData.rates as Record<string, number>) || {},
+      );
 
       this.exchangeRates = {
         base: baseCurrency,
@@ -92,46 +119,71 @@ export class CurrencyService {
     }
   }
 
-  private async fetchCryptoRates(baseCurrency: string): Promise<Record<string, number>> {
+  /**
+   * How much of each crypto you get for 1 unit of `baseCurrency` (same shape as before).
+   * Binance quotes USDT≈USD; Frankfurter `fiatRates` is "foreign per 1 base" (includes USD when base ≠ USD).
+   */
+  private async fetchCryptoRates(
+    baseCurrency: string,
+    fiatRates: Record<string, number>,
+  ): Promise<Record<string, number>> {
     try {
-      // CoinGecko API for crypto prices
-      const cryptoIds = 'bitcoin,ethereum,tether,binancecoin,ripple,cardano,solana,dogecoin';
-      const response = await fetch(
-        `https://api.coingecko.com/api/v3/simple/price?ids=${cryptoIds}&vs_currencies=${baseCurrency.toLowerCase()}`
-      );
+      const response = await fetch(BINANCE_TICKER_URL, {
+        headers: OUTBOUND_FETCH_HEADERS,
+      });
 
       if (!response.ok) {
-        throw new Error('Failed to fetch crypto rates');
+        throw new Error(`Binance ticker HTTP ${response.status}`);
       }
 
-      const data = await response.json();
-      const baseLower = baseCurrency.toLowerCase();
+      const rows = (await response.json()) as Array<{ symbol: string; price: string }>;
+      if (!Array.isArray(rows)) {
+        throw new Error('Unexpected Binance ticker response');
+      }
 
-      // Map crypto IDs to symbols and calculate inverse rates
-      // (we need how much 1 crypto is worth in base currency, then invert for conversion)
-      const cryptoMap: Record<string, string> = {
-        bitcoin: 'BTC',
-        ethereum: 'ETH',
-        tether: 'USDT',
-        binancecoin: 'BNB',
-        ripple: 'XRP',
-        cardano: 'ADA',
-        solana: 'SOL',
-        dogecoin: 'DOGE',
-      };
-
-      const rates: Record<string, number> = {};
-      for (const [id, symbol] of Object.entries(cryptoMap)) {
-        if (data[id] && data[id][baseLower]) {
-          // Store how much 1 unit of base currency is worth in crypto
-          rates[symbol] = 1 / data[id][baseLower];
+      const byTicker = new Map<string, number>();
+      for (const row of rows) {
+        const price = parseFloat(row.price);
+        if (Number.isFinite(price) && price > 0) {
+          byTicker.set(row.symbol, price);
         }
       }
+
+      const priceUsdPerCoin: Record<string, number> = {};
+      for (const { asset, ticker } of BINANCE_USDT_PAIRS) {
+        const p = byTicker.get(ticker);
+        if (p !== undefined) {
+          priceUsdPerCoin[asset] = p;
+        }
+      }
+
+      const base = baseCurrency.toUpperCase();
+      // Frankfurter: rates['USD'] = USD per 1 unit of base (not present when base is USD).
+      const rawUsd = base === 'USD' ? 1 : fiatRates['USD'];
+      const u =
+        typeof rawUsd === 'number' && Number.isFinite(rawUsd) && rawUsd > 0 ? rawUsd : 1;
+
+      if (base !== 'USD' && u === 1 && fiatRates['USD'] === undefined) {
+        this.logger.warn(
+          `No USD cross-rate from Frankfurter for base ${base}; using u=1 for crypto (check fiat list)`,
+        );
+      }
+
+      const rates: Record<string, number> = {};
+      for (const { asset } of BINANCE_USDT_PAIRS) {
+        const p = priceUsdPerCoin[asset];
+        if (p !== undefined) {
+          rates[asset] = u / p;
+        }
+      }
+
+      // USDT ≈ 1 USD (no USDTUSDT pair needed)
+      rates['USDT'] = u;
 
       this.cryptoRates = rates;
       return rates;
     } catch (error) {
-      this.logger.warn('Failed to fetch crypto rates, using cached or fallback');
+      this.logger.warn('Failed to fetch crypto rates from Binance, using cached or empty', error);
       return this.cryptoRates;
     }
   }
