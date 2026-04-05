@@ -11,6 +11,7 @@ import { PropertiesModule } from './properties/properties.module';
 import { PropertyTransactionsModule } from './property-transactions/property-transactions.module';
 import { PropertyCategoriesModule } from './property-categories/property-categories.module';
 import { PropertySharingModule } from './property-sharing/property-sharing.module';
+import { PropertyValuationModule } from './property-valuation/property-valuation.module';
 
 @Module({
   imports: [
@@ -28,6 +29,7 @@ import { PropertySharingModule } from './property-sharing/property-sharing.modul
     PropertyTransactionsModule,
     PropertyCategoriesModule,
     PropertySharingModule,
+    PropertyValuationModule,
   ],
 })
 export class AppModule {}

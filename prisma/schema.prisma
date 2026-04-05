@@ -131,6 +131,19 @@ enum CategoryType {
   PROFIT
 }
 
+enum PropertyType {
+  APARTMENT
+  HOUSE
+  LAND
+  COMMERCIAL
+  OTHER
+}
+
+enum SizeUnit {
+  SQM
+  SQFT
+}
+
 model Property {
   id          String   @id @default(uuid())
   name        String
@@ -140,6 +153,17 @@ model Property {
   user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+
+  // Valuation fields
+  propertyType           PropertyType?
+  size                   Decimal?      @db.Decimal(20, 2)
+  sizeUnit               SizeUnit?
+  country                String?
+  city                   String?
+  estimatedValue         Decimal?      @db.Decimal(20, 2)
+  estimatedValueCurrency String?
+  estimatedValueDate     DateTime?
+  valuationSource        String?       // 'zillow', 'fallback', etc.
 
   transactions PropertyTransaction[]
   shares       PropertyShare[]
