@@ -5,7 +5,7 @@ import { ConfigService } from '@nestjs/config';
 export interface ValuationResult {
   estimatedValue: number;
   currency: string;
-  source: 'zillow' | 'fallback';
+  source: 'gemini' | 'zillow' | 'fallback';
   lastUpdated: Date;
   confidence: 'high' | 'medium' | 'low';
 }
@@ -116,17 +116,79 @@ const CITY_MULTIPLIERS: Record<string, number> = {
   amsterdam: 1.4,
 };
 
+// Country code to name mapping for Gemini prompt
+const COUNTRY_NAMES: Record<string, string> = {
+  US: 'United States',
+  GB: 'United Kingdom',
+  DE: 'Germany',
+  FR: 'France',
+  IL: 'Israel',
+  CA: 'Canada',
+  AU: 'Australia',
+  NZ: 'New Zealand',
+  JP: 'Japan',
+  CH: 'Switzerland',
+  NL: 'Netherlands',
+  BE: 'Belgium',
+  IT: 'Italy',
+  ES: 'Spain',
+  PT: 'Portugal',
+  AT: 'Austria',
+  IE: 'Ireland',
+  SE: 'Sweden',
+  NO: 'Norway',
+  DK: 'Denmark',
+  FI: 'Finland',
+  PL: 'Poland',
+  CZ: 'Czech Republic',
+  HU: 'Hungary',
+  GR: 'Greece',
+  TR: 'Turkey',
+  RU: 'Russia',
+  BR: 'Brazil',
+  MX: 'Mexico',
+  AR: 'Argentina',
+  CL: 'Chile',
+  CO: 'Colombia',
+  IN: 'India',
+  CN: 'China',
+  KR: 'South Korea',
+  SG: 'Singapore',
+  HK: 'Hong Kong',
+  AE: 'United Arab Emirates',
+  SA: 'Saudi Arabia',
+  ZA: 'South Africa',
+  EG: 'Egypt',
+  NG: 'Nigeria',
+  KE: 'Kenya',
+  TH: 'Thailand',
+  MY: 'Malaysia',
+  ID: 'Indonesia',
+  PH: 'Philippines',
+  VN: 'Vietnam',
+};
+
+const PROPERTY_TYPE_NAMES: Record<string, string> = {
+  APARTMENT: 'Apartment',
+  HOUSE: 'House',
+  LAND: 'Land',
+  COMMERCIAL: 'Commercial Property',
+  OTHER: 'Property',
+};
+
 @Injectable()
 export class PropertyValuationService {
   private readonly logger = new Logger(PropertyValuationService.name);
   private readonly CACHE_DURATION_MS = 24 * 60 * 60 * 1000; // 24 hours
   private readonly rapidApiKey: string | undefined;
+  private readonly geminiApiKey: string | undefined;
 
   constructor(
     private prisma: PrismaService,
     private configService: ConfigService,
   ) {
     this.rapidApiKey = this.configService.get<string>('RAPIDAPI_KEY');
+    this.geminiApiKey = this.configService.get<string>('GEMINI_API_KEY');
   }
 
   async getValuation(propertyId: string, userId: string): Promise<ValuationResult> {
@@ -161,9 +223,9 @@ export class PropertyValuationService {
       return {
         estimatedValue: Number(property.estimatedValue),
         currency: property.estimatedValueCurrency || 'USD',
-        source: (property.valuationSource as 'zillow' | 'fallback') || 'fallback',
+        source: (property.valuationSource as 'gemini' | 'zillow' | 'fallback') || 'fallback',
         lastUpdated: property.estimatedValueDate,
-        confidence: property.valuationSource === 'zillow' ? 'high' : 'medium',
+        confidence: this.getConfidenceLevel(property.valuationSource),
       };
     }
 
@@ -197,8 +259,22 @@ export class PropertyValuationService {
     return this.calculateAndStoreValuation(property);
   }
 
+  private getConfidenceLevel(source: string | null): 'high' | 'medium' | 'low' {
+    switch (source) {
+      case 'gemini':
+        return 'high';
+      case 'zillow':
+        return 'high';
+      case 'fallback':
+        return 'medium';
+      default:
+        return 'low';
+    }
+  }
+
   private async calculateAndStoreValuation(property: {
     id: string;
+    name: string;
     address?: string | null;
     country?: string | null;
     city?: string | null;
@@ -206,10 +282,24 @@ export class PropertyValuationService {
     sizeUnit?: string | null;
     propertyType?: string | null;
   }): Promise<ValuationResult> {
-    let result: ValuationResult;
+    let result: ValuationResult | null = null;
 
-    // Try Zillow API for US properties with address
+    // Try Gemini API first (works globally)
+    if (this.geminiApiKey && property.country) {
+      try {
+        result = await this.fetchGeminiValuation(property);
+        this.logger.log(`[valuation] Gemini success propertyId=${property.id}`);
+      } catch (error) {
+        this.logger.warn(
+          `[valuation] Gemini failed propertyId=${property.id}: ${error}`,
+        );
+        // Fall through to next option
+      }
+    }
+
+    // Try Zillow API for US properties with address (if Gemini failed or unavailable)
     if (
+      !result &&
       property.country === 'US' &&
       property.address &&
       this.rapidApiKey
@@ -219,12 +309,16 @@ export class PropertyValuationService {
         this.logger.log(`[valuation] Zillow success propertyId=${property.id}`);
       } catch (error) {
         this.logger.warn(
-          `[valuation] Zillow failed propertyId=${property.id}, falling back to estimate: ${error}`,
+          `[valuation] Zillow failed propertyId=${property.id}: ${error}`,
         );
-        result = this.calculateFallbackValuation(property);
+        // Fall through to fallback
       }
-    } else {
+    }
+
+    // Use fallback calculation if all APIs failed
+    if (!result) {
       result = this.calculateFallbackValuation(property);
+      this.logger.log(`[valuation] Using fallback for propertyId=${property.id}`);
     }
 
     // Store the valuation
@@ -239,6 +333,126 @@ export class PropertyValuationService {
     });
 
     return result;
+  }
+
+  private async fetchGeminiValuation(property: {
+    name: string;
+    address?: string | null;
+    country?: string | null;
+    city?: string | null;
+    size?: any;
+    sizeUnit?: string | null;
+    propertyType?: string | null;
+  }): Promise<ValuationResult> {
+    const countryName = COUNTRY_NAMES[property.country?.toUpperCase() || ''] || property.country;
+    const propertyTypeName = PROPERTY_TYPE_NAMES[property.propertyType || 'OTHER'] || 'Property';
+    const sizeValue = property.size ? Number(property.size) : null;
+    const sizeUnit = property.sizeUnit === 'SQFT' ? 'square feet' : 'square meters';
+
+    // Build property description for the prompt
+    const propertyDetails: string[] = [];
+    propertyDetails.push(`Type: ${propertyTypeName}`);
+    if (sizeValue) {
+      propertyDetails.push(`Size: ${sizeValue} ${sizeUnit}`);
+    }
+    if (property.city) {
+      propertyDetails.push(`City: ${property.city}`);
+    }
+    propertyDetails.push(`Country: ${countryName}`);
+    if (property.address) {
+      propertyDetails.push(`Address: ${property.address}`);
+    }
+
+    const prompt = `You are a real estate valuation expert. Based on current market conditions and the property details below, estimate the market value of this property in USD.
+
+Property Details:
+${propertyDetails.join('\n')}
+
+IMPORTANT: Respond with ONLY a JSON object in this exact format, no other text:
+{"estimatedValue": <number>, "currency": "USD"}
+
+The estimatedValue should be a realistic market value number (no commas, no currency symbols, just the number).
+Consider local real estate market conditions, property type, size, and location when making your estimate.`;
+
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${this.geminiApiKey}`;
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        contents: [
+          {
+            parts: [{ text: prompt }],
+          },
+        ],
+        generationConfig: {
+          temperature: 0.3,
+          maxOutputTokens: 100,
+        },
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Gemini API error: ${response.status} - ${errorText}`);
+    }
+
+    const data = await response.json();
+
+    // Extract the text response
+    const textResponse = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!textResponse) {
+      throw new Error('No response from Gemini');
+    }
+
+    this.logger.log(`[valuation] Gemini raw response: ${textResponse}`);
+
+    // Parse the JSON response
+    // Try to extract JSON from the response (it might have markdown code blocks)
+    let jsonStr = textResponse.trim();
+
+    // Remove markdown code blocks if present
+    if (jsonStr.startsWith('```json')) {
+      jsonStr = jsonStr.slice(7);
+    } else if (jsonStr.startsWith('```')) {
+      jsonStr = jsonStr.slice(3);
+    }
+    if (jsonStr.endsWith('```')) {
+      jsonStr = jsonStr.slice(0, -3);
+    }
+    jsonStr = jsonStr.trim();
+
+    let parsed: { estimatedValue: number; currency: string };
+    try {
+      parsed = JSON.parse(jsonStr);
+    } catch (parseError) {
+      // Try to extract number from response as fallback
+      const numberMatch = textResponse.match(/(\d{1,3}(?:,\d{3})*(?:\.\d+)?|\d+(?:\.\d+)?)/);
+      if (numberMatch) {
+        const value = parseFloat(numberMatch[1].replace(/,/g, ''));
+        if (value > 0) {
+          parsed = { estimatedValue: value, currency: 'USD' };
+        } else {
+          throw new Error(`Failed to parse Gemini response: ${textResponse}`);
+        }
+      } else {
+        throw new Error(`Failed to parse Gemini response: ${textResponse}`);
+      }
+    }
+
+    if (!parsed.estimatedValue || typeof parsed.estimatedValue !== 'number' || parsed.estimatedValue <= 0) {
+      throw new Error(`Invalid estimated value from Gemini: ${parsed.estimatedValue}`);
+    }
+
+    return {
+      estimatedValue: Math.round(parsed.estimatedValue),
+      currency: parsed.currency || 'USD',
+      source: 'gemini',
+      lastUpdated: new Date(),
+      confidence: 'high',
+    };
   }
 
   private async fetchZillowValuation(address: string): Promise<ValuationResult> {
@@ -326,56 +540,9 @@ export class PropertyValuationService {
 
   // Get available countries for dropdown
   getAvailableCountries(): Array<{ code: string; name: string }> {
-    const countries: Array<{ code: string; name: string }> = [
-      { code: 'US', name: 'United States' },
-      { code: 'GB', name: 'United Kingdom' },
-      { code: 'DE', name: 'Germany' },
-      { code: 'FR', name: 'France' },
-      { code: 'IL', name: 'Israel' },
-      { code: 'CA', name: 'Canada' },
-      { code: 'AU', name: 'Australia' },
-      { code: 'NZ', name: 'New Zealand' },
-      { code: 'JP', name: 'Japan' },
-      { code: 'CH', name: 'Switzerland' },
-      { code: 'NL', name: 'Netherlands' },
-      { code: 'BE', name: 'Belgium' },
-      { code: 'IT', name: 'Italy' },
-      { code: 'ES', name: 'Spain' },
-      { code: 'PT', name: 'Portugal' },
-      { code: 'AT', name: 'Austria' },
-      { code: 'IE', name: 'Ireland' },
-      { code: 'SE', name: 'Sweden' },
-      { code: 'NO', name: 'Norway' },
-      { code: 'DK', name: 'Denmark' },
-      { code: 'FI', name: 'Finland' },
-      { code: 'PL', name: 'Poland' },
-      { code: 'CZ', name: 'Czech Republic' },
-      { code: 'HU', name: 'Hungary' },
-      { code: 'GR', name: 'Greece' },
-      { code: 'TR', name: 'Turkey' },
-      { code: 'RU', name: 'Russia' },
-      { code: 'BR', name: 'Brazil' },
-      { code: 'MX', name: 'Mexico' },
-      { code: 'AR', name: 'Argentina' },
-      { code: 'CL', name: 'Chile' },
-      { code: 'CO', name: 'Colombia' },
-      { code: 'IN', name: 'India' },
-      { code: 'CN', name: 'China' },
-      { code: 'KR', name: 'South Korea' },
-      { code: 'SG', name: 'Singapore' },
-      { code: 'HK', name: 'Hong Kong' },
-      { code: 'AE', name: 'United Arab Emirates' },
-      { code: 'SA', name: 'Saudi Arabia' },
-      { code: 'ZA', name: 'South Africa' },
-      { code: 'EG', name: 'Egypt' },
-      { code: 'NG', name: 'Nigeria' },
-      { code: 'KE', name: 'Kenya' },
-      { code: 'TH', name: 'Thailand' },
-      { code: 'MY', name: 'Malaysia' },
-      { code: 'ID', name: 'Indonesia' },
-      { code: 'PH', name: 'Philippines' },
-      { code: 'VN', name: 'Vietnam' },
-    ];
+    const countries: Array<{ code: string; name: string }> = Object.entries(COUNTRY_NAMES).map(
+      ([code, name]) => ({ code, name }),
+    );
     return countries.sort((a, b) => a.name.localeCompare(b.name));
   }
 }
