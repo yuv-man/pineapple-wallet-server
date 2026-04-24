@@ -28,6 +28,10 @@ model User {
   propertySharedWith PropertyShare[] @relation("SharedWithUserProperty")
   customCategories   PropertyCategory[]
 
+  liabilities       Liability[]
+  netWorthSnapshots NetWorthSnapshot[]
+  assetsAdded       Asset[]            @relation("AssetAddedBy")
+
   @@map("users")
 }
 
@@ -84,17 +88,19 @@ enum ShareStatus {
 }
 
 model Asset {
-  id          String    @id @default(uuid())
-  portfolioId String
-  portfolio   Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
-  type        AssetType
-  name        String
-  value       Decimal   @db.Decimal(20, 2)
-  currency    String    @default("USD")
-  notes       String?
-  details     Json?     // Type-specific details stored as JSON
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  id            String    @id @default(uuid())
+  portfolioId   String
+  portfolio     Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+  type          AssetType
+  name          String
+  value         Decimal   @db.Decimal(20, 2)
+  currency      String    @default("USD")
+  notes         String?
+  details       Json?     // Type-specific details stored as JSON
+  addedByUserId String?
+  addedBy       User?     @relation("AssetAddedBy", fields: [addedByUserId], references: [id], onDelete: SetNull)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
   valueHistory AssetValueHistory[]
 
@@ -216,4 +222,63 @@ model PropertyShare {
 
   @@unique([propertyId, sharedWithUserId])
   @@map("property_shares")
+}
+
+// ==================== LIABILITIES & NET WORTH HISTORY ====================
+
+enum LiabilityType {
+  CREDIT_CARD
+  MORTGAGE
+  STUDENT_LOAN
+  PERSONAL_LOAN
+  AUTO_LOAN
+  HOME_EQUITY_LOAN
+  MEDICAL_DEBT
+  OTHER
+}
+
+model Liability {
+  id             String        @id @default(uuid())
+  userId         String
+  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type           LiabilityType
+  name           String
+  balance        Decimal       @db.Decimal(20, 2)
+  currency       String        @default("USD")
+  interestRate   Decimal?      @db.Decimal(5, 4)
+  minimumPayment Decimal?      @db.Decimal(20, 2)
+  dueDate        DateTime?
+  notes          String?
+  details        Json?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  balanceHistory LiabilityBalanceHistory[]
+
+  @@map("liabilities")
+}
+
+model LiabilityBalanceHistory {
+  id          String    @id @default(uuid())
+  liabilityId String
+  liability   Liability @relation(fields: [liabilityId], references: [id], onDelete: Cascade)
+  balance     Decimal   @db.Decimal(20, 2)
+  recordedAt  DateTime  @default(now())
+
+  @@map("liability_balance_history")
+}
+
+model NetWorthSnapshot {
+  id               String   @id @default(uuid())
+  userId           String
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  totalAssets      Decimal  @db.Decimal(20, 2)
+  totalLiabilities Decimal  @db.Decimal(20, 2)
+  netWorth         Decimal  @db.Decimal(20, 2)
+  currency         String   @default("USD")
+  snapshotDate     DateTime @default(now())
+
+  @@unique([userId, snapshotDate])
+  @@index([userId, snapshotDate])
+  @@map("net_worth_snapshots")
 }

@@ -31,6 +31,7 @@ export class AssetsService {
         currency: dto.currency || 'USD',
         notes: dto.notes,
         details: dto.details || {},
+        addedByUserId: userId,
       },
     });
 
@@ -58,6 +59,9 @@ export class AssetsService {
           orderBy: { recordedAt: 'desc' },
           take: 10,
         },
+        addedBy: {
+          select: { id: true, name: true, avatar: true },
+        },
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -71,6 +75,9 @@ export class AssetsService {
         valueHistory: {
           orderBy: { recordedAt: 'desc' },
           take: 30,
+        },
+        addedBy: {
+          select: { id: true, name: true, avatar: true },
         },
       },
     });

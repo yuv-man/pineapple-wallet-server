@@ -58,6 +58,8 @@ export class CurrencyController {
     @CurrentUser() user: any,
     @Query('currency') targetCurrency: string = 'USD',
   ) {
+    const target = targetCurrency.toUpperCase();
+
     // Get all portfolios owned by user
     const ownedPortfolios = await this.prisma.portfolio.findMany({
       where: { userId: user.sub },
@@ -79,10 +81,31 @@ export class CurrencyController {
 
     const allPortfolios = [...ownedPortfolios, ...sharedPortfolios];
 
-    return this.currencyService.getNetWorth(
+    const assetsResult = await this.currencyService.getNetWorth(
       allPortfolios,
-      targetCurrency.toUpperCase(),
+      target,
     );
+
+    const liabilities = await this.prisma.liability.findMany({
+      where: { userId: user.sub },
+    });
+
+    let totalLiabilities = 0;
+    for (const l of liabilities) {
+      totalLiabilities += await this.currencyService.convert(
+        Number(l.balance),
+        l.currency,
+        target,
+      );
+    }
+
+    return {
+      ...assetsResult,
+      totalAssets: assetsResult.totalNetWorth,
+      totalLiabilities,
+      totalNetWorth: assetsResult.totalNetWorth - totalLiabilities,
+      liabilityCount: liabilities.length,
+    };
   }
 
   @UseGuards(JwtAuthGuard)
