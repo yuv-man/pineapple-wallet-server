@@ -16,9 +16,19 @@ async function bootstrap() {
     ? configService.get<string>("PROD_URL")
     : configService.get<string>("DEV_URL") || "http://localhost:3000";
 
-  // CORS configuration - more restrictive in production
+  // CORS configuration
+  // Always include Capacitor native origins so the Android/iOS app can reach the API.
+  const capacitorOrigins = [
+    "capacitor://localhost",
+    "http://localhost",          // Android WebView (Capacitor)
+    "ionic://localhost",         // iOS Capacitor fallback
+  ];
+  const allowedOrigins: string[] | true = isProduction
+    ? ([frontendUrl, ...capacitorOrigins].filter(Boolean) as string[])
+    : true; // allow all in dev
+
   app.enableCors({
-    origin: frontendUrl || (isProduction ? false : true), // Allow all origins in dev, specific in prod
+    origin: allowedOrigins,
     credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
