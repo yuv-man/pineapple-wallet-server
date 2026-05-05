@@ -99,6 +99,14 @@ export class PortfoliosService {
       include: {
         assets: {
           orderBy: { createdAt: 'desc' },
+          include: {
+            addedBy: {
+              select: { id: true, name: true, avatar: true },
+            },
+            valueHistory: {
+              orderBy: { recordedAt: 'asc' },
+            },
+          },
         },
         shares: {
           include: {

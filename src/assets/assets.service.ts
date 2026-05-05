@@ -122,6 +122,12 @@ export class AssetsService {
         currency: dto.currency,
         notes: dto.notes,
         details: dto.details,
+        addedByUserId: dto.addedByUserId,
+      },
+      include: {
+        addedBy: {
+          select: { id: true, name: true, avatar: true },
+        },
       },
     });
 

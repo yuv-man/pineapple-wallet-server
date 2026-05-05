@@ -3,6 +3,7 @@ import {
   IsOptional,
   IsNumber,
   IsObject,
+  IsUUID,
   MinLength,
   MaxLength,
   Min,
@@ -33,4 +34,8 @@ export class UpdateAssetDto {
   @IsOptional()
   @IsObject()
   details?: Record<string, any>;
+
+  @IsOptional()
+  @IsUUID()
+  addedByUserId?: string;
 }
